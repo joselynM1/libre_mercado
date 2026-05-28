@@ -49,16 +49,20 @@ if (isset($_SESSION['carrito'])) {
 <body>
 
     <header class="navbar">
-        <a href="index.php" class="logo">ML Mercado</a>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <a href="index.php" class="logo">ML Mercado</a>
+            <span style="background:#b7950b; color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:bold;">⭐ Sucursal Norte · Casa Matriz</span>
+        </div>
         <input type="text" class="search-bar" placeholder="Buscar productos, marcas y más...">
-        
-        <!-- Enlace al archivo del carrito mostrando la cantidad de artículos acumulados -->
-        <a href="ver_carrito.php" class="cart-btn">
-            🛒 Carrito 
-            <?php if ($total_items_navbar > 0): ?>
-                <span class="cart-count"><?php echo $total_items_navbar; ?></span>
-            <?php endif; ?>
-        </a>
+        <div style="display:flex; gap:12px; align-items:center;">
+            <a href="../casa_matriz/index.php" style="color:#333; text-decoration:none; font-size:13px; font-weight:bold;">🏢 Panel Central</a>
+            <a href="ver_carrito.php" class="cart-btn">
+                🛒 Carrito
+                <?php if ($total_items_navbar > 0): ?>
+                    <span class="cart-count"><?php echo $total_items_navbar; ?></span>
+                <?php endif; ?>
+            </a>
+        </div>
     </header>
 
     <main class="main-container">
@@ -75,13 +79,13 @@ if (isset($_SESSION['carrito'])) {
                             <div class="product-info">
                                 <div class="shipping">🚚 Envío gratis</div>
                                 <h2 class="product-name"><?php echo htmlspecialchars($p['producto']); ?></h2>
-                                <div class="price">$ <?php echo number_format($p['precio'], 0, ',', '.'); ?></div>
+                                <div class="price">$ <?php echo number_format($p['precio_unitario'], 0, ',', '.'); ?></div>
                                 <div class="stock-label">Disponible para entrega inmediata</div>
                             </div>
                         </div>
                         <div style="padding: 0 15px 15px 15px;">
                             <!-- Envía al controlador de sesión y regresa al index.php de inmediato -->
-                            <a href="carrito_accion.php?accion=agregar&id_prod=<?php echo $p['id_prod']; ?>" style="text-decoration: none;">
+                            <a href="carrito_accion.php?accion=agregar&id_producto=<?php echo $p['id_producto']; ?>" style="text-decoration: none;">
                                 <button class="add-to-cart">Añadir al Carrito</button>
                             </a>
                         </div>

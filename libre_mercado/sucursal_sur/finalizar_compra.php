@@ -17,7 +17,7 @@ $db->beginTransaction();
 
 try {
     $total_venta  = 0;
-    $id_sucursal  = 1; // Sucursal Norte (Casa Matriz)
+    $id_sucursal  = 3; // Sucursal Sur
 
     $nombre_ingresado = isset($_POST['nombre_cliente']) ? trim($_POST['nombre_cliente']) : 'Cliente Anónimo';
     $email_ingresado  = isset($_POST['email_cliente'])  ? trim($_POST['email_cliente'])  : '';
@@ -125,7 +125,7 @@ try {
 </head>
 <body>
     <div class="card-resultado">
-        <div style="font-size:13px; color:#b7950b; font-weight:bold; margin-bottom:15px;">⭐ SUCURSAL NORTE — CASA MATRIZ</div>
+        <div style="font-size:13px; color:#1a6b37; font-weight:bold; margin-bottom:15px;">🟢 SUCURSAL SUR</div>
         <?php if ($status === "success"): ?>
             <div class="icon success">✓</div>
             <h1 class="success">¡Muchas gracias por tu compra!</h1>

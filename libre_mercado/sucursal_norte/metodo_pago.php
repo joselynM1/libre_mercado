@@ -13,7 +13,7 @@ if (empty($items_carrito)) {
 $subtotal = 0;
 $total_items = 0;
 foreach ($items_carrito as $item) {
-    $subtotal += ($item['precio'] * $item['cantidad']);
+    $subtotal += ($item['precio_unitario'] * $item['cantidad']);
     $total_items += $item['cantidad'];
 }
 ?>
@@ -114,7 +114,7 @@ foreach ($items_carrito as $item) {
                                 <strong><?php echo htmlspecialchars($item['producto']); ?></strong><br>
                                 <span style="color:#999;">Cantidad: <?php echo $item['cantidad']; ?></span>
                             </div>
-                            <div>$<?php echo number_format($item['precio'], 0, ',', '.'); ?></div>
+                            <div>$<?php echo number_format($item['precio_unitario'], 0, ',', '.'); ?></div>
                         </div>
                     <?php endforeach; ?>
 

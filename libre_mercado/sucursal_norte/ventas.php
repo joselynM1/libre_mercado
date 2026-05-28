@@ -8,7 +8,7 @@ $ventaControlador = new Venta();
 $mensajeTransaccion = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $idProducto = intval($_POST['id_prod']);
+    $idProducto = intval($_POST['id_producto']);
     $cantidad = intval($_POST['cantidad']);
     
     // Ejecutar procesamiento con ID de Cliente=1 y ID de Sucursal=1 fijo para la prueba
@@ -49,8 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <h2>Procesar Nueva Venta</h2>
     <form action="ventas.php" method="POST">
-        <label for="id_prod">ID del Producto en Inventario:</label>
-        <input type="number" name="id_prod" value="1" required>
+        <label for="id_producto">ID del Producto en Inventario:</label>
+        <input type="number" name="id_producto" id="id_producto" value="1" required>
 
         <label for="cantidad">Cantidad a Comprar:</label>
         <input type="number" name="cantidad" placeholder="Cantidad de unidades" min="1" required>

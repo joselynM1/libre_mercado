@@ -9,7 +9,7 @@ $total_items = 0;
 
 // Calcular el total de la compra dinámicamente recorriendo los artículos agregados
 foreach ($items_carrito as $item) {
-    $subtotal += ($item['precio'] * $item['cantidad']);
+    $subtotal += ($item['precio_unitario'] * $item['cantidad']);
     $total_items += $item['cantidad'];
 }
 ?>
@@ -241,13 +241,13 @@ foreach ($items_carrito as $item) {
                                     <button class="btn-cant" onclick="alert('Funcionalidad opcional: Modificar cantidad en base de datos')">+</button>
                                 </div>
                                 <!-- Enlace al controlador que remueve este producto mediante su ID -->
-                                <a href="carrito_accion.php?accion=eliminar&id_prod=<?php echo $item['id_prod']; ?>" onclick="return confirm('¿Remover este producto de la compra?')">
+                                <a href="carrito_accion.php?accion=eliminar&id_producto=<?php echo $item['id_producto']; ?>" onclick="return confirm('¿Remover este producto de la compra?')">
                                     <button class="btn-borrar" title="Eliminar artículo">🗑️</button>
                                 </a>
                             </div>
                         </div>
                         <div class="prod-precio">
-                            $<?php echo number_format($item['precio'], 0, ',', '.'); ?>
+                            $<?php echo number_format($item['precio_unitario'], 0, ',', '.'); ?>
                             <div style="font-size: 12px; color: #00a650; font-weight: normal; margin-top: 5px;">Envío gratis</div>
                         </div>
                     </div>

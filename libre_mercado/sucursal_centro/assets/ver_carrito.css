@@ -1,0 +1,61 @@
+/* CSS INTERNO */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
+        
+        /* HEADER NAVBAR */
+        .header { 
+            background-color: #ffffff; 
+            border-bottom: 1px solid #e2e8f0; 
+            padding: 0 40px; 
+            height: 70px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02); 
+        }
+        .brand { display: flex; align-items: center; gap: 16px; }
+        .brand-logo { font-size: 24px; font-weight: 800; color: #0f172a; text-decoration: none; }
+        .brand-logo span { color: #10b981; }
+        .checkout-badge { 
+            font-size: 11px; 
+            background: #f1f5f9; 
+            padding: 4px 10px; 
+            border-radius: 6px; 
+            font-weight: 600; 
+            color: #475569; 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+        }
+
+        /* CONTENEDOR PRINCIPAL */
+        .container { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        h1 { font-size: 28px; font-weight: 800; color: #0f172a; margin-bottom: 25px; letter-spacing: -0.5px; }
+        .card-panel { background: white; border-radius: 16px; border: 1px solid #e2e8f0; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.01); margin-bottom: 24px; }
+        
+        /* LISTADO DE ARTÍCULOS */
+        .cart-item { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; border-bottom: 1px solid #f1f5f9; }
+        .cart-item:last-child { border-bottom: none; }
+        .item-details h4 { font-size: 16px; font-weight: 700; color: #0f172a; }
+        .item-details p { font-size: 13px; color: #64748b; margin-top: 4px; }
+        .item-price { font-size: 16px; font-weight: 700; color: #0f172a; }
+        
+        /* FORMULARIO DE CLIENTE */
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-control { width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; outline: none; background-color: #f8fafc; transition: all 0.15s; }
+        .form-control:focus { border-color: #10b981; background-color: #ffffff; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.08); }
+        
+        /* SECCIÓN TOTALES */
+        .total-box { display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #e2e8f0; margin-top: 20px; padding-top: 20px; }
+        .total-box span { font-size: 18px; font-weight: 700; color: #475569; }
+        .total-box strong { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+        
+        /* BOTONES */
+        .btn-submit { display: block; width: 100%; text-align: center; background-color: #10b981; color: white; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700; border: none; cursor: pointer; text-decoration: none; margin-top: 10px; transition: background-color 0.15s; box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2); }
+        .btn-submit:hover { background-color: #059669; }
+        .btn-back { display: block; text-align: center; font-size: 14px; color: #64748b; text-decoration: none; margin-top: 20px; font-weight: 600; transition: color 0.15s; }
+        .btn-back:hover { color: #0f172a; }
+        /* eliminar producto del carrito */
+        .item-actions { display: flex; align-items: center; gap: 16px; }
+        .btn-eliminar { font-size: 12px; font-weight: 600; color: #ef4444; text-decoration: none; padding: 4px 10px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; transition: all 0.15s; }
+        .btn-eliminar:hover { background: #ef4444; color: white; border-color: #ef4444; }

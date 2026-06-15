@@ -1,0 +1,64 @@
+services:
+
+  app:
+    build: ./app
+    container_name: lm_app
+    ports:
+      - "8080:80"
+    depends_on:
+      - db_suc1
+      - db_suc2
+      - db_suc3
+    networks:
+      - tienda_net
+
+  db_suc1:
+    image: mariadb:10.4
+    container_name: lm_db_suc1
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: libre_mercado_suc1
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app123
+    volumes:
+      - ./sql/suc1.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_suc1_data:/var/lib/mysql
+    networks:
+      - tienda_net
+
+  db_suc2:
+    image: mariadb:10.4
+    container_name: lm_db_suc2
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: libre_mercado_suc2
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app123
+    volumes:
+      - ./sql/suc2.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_suc2_data:/var/lib/mysql
+    networks:
+      - tienda_net
+
+  db_suc3:
+    image: mariadb:10.4
+    container_name: lm_db_suc3
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: libre_mercado_suc3
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app123
+    volumes:
+      - ./sql/suc3.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_suc3_data:/var/lib/mysql
+    networks:
+      - tienda_net
+
+networks:
+  tienda_net:
+    driver: bridge
+
+volumes:
+  db_suc1_data:
+  db_suc2_data:
+  db_suc3_data:

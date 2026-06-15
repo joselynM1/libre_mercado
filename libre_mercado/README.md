@@ -186,12 +186,4 @@ libre_mercado/
             └── style.css
 ```
 
-## Próximos pasos sugeridos
 
-- Agregar CRUD completo de productos, clientes, proveedores (con
-  borrado lógico usando el campo `activo`).
-- Agregar módulo de compras/reabastecimiento con proveedores.
-- Agregar autenticación básica de usuarios (roles: administrador,
-  operador, cliente).
-- Completar el documento de arquitectura CAP (ver
-  `docs/arquitectura_cap.md`).

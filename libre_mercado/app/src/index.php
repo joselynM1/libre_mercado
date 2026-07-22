@@ -109,13 +109,17 @@
             </div>
 
             <div class="checkout-card">
-                <h2>2. Información de facturación (validación ACID)</h2>
+                <h2>2. Información del comprador</h2>
 
-                <label>Nombre completo del comprador</label>
+                <label>Nombre completo</label>
                 <input type="text" id="checkout-nombre" placeholder="Ej. Juan Pérez">
 
                 <label>Correo electrónico</label>
                 <input type="email" id="checkout-email" placeholder="ejemplo@correo.com">
+
+                <p style="font-size:0.82rem; color:var(--muted); margin:8px 0 0;">
+                    Si no estás registrado, se creará tu cuenta automáticamente.
+                </p>
 
                 <button class="btn-pago" id="btn-confirmar-pago">🔒 Confirmar y Descontar Stock de Forma Atómica</button>
                 <div id="msg-checkout" class="mensaje"></div>
@@ -125,6 +129,6 @@
         </div>
     </div>
 
-    <script src="assets/app.js?v=2"></script>
+    <script src="assets/app.js?v=3"></script>
 </body>
 </html>

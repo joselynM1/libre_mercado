@@ -93,8 +93,13 @@ try {
         'id_compra' => $idCompra,
     ]);
 
-} catch (Throwable $e) {
+} catch (RuntimeException $e) {
     $pdo->rollBack();
     http_response_code(409);
     echo json_encode(['ok' => false, 'mensaje' => $e->getMessage()]);
+} catch (Throwable $e) {
+    $pdo->rollBack();
+    error_log('procesar_compra: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'mensaje' => 'Ocurrió un error al registrar la compra. Intenta nuevamente.']);
 }

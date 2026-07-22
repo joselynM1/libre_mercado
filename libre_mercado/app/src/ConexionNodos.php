@@ -15,14 +15,23 @@ class ConexionNodos
     private const USER = 'app';
     private const PASS = 'app123';
 
+    private const ESTADO_FILE = '/tmp/libre_mercado_nodos.json';
+
     /**
      * Devuelve una conexión PDO al nodo indicado.
-     * Lanza PDOException si el nodo no responde (caído / partición de red).
+     * Lanza RuntimeException si el nodo está marcado como OFFLINE (falla simulada).
+     * Lanza PDOException si el nodo no responde (caído / partición de red real).
      */
     public static function get(int $idSucursal): PDO
     {
         if (!isset(self::$config[$idSucursal])) {
             throw new InvalidArgumentException("Sucursal inválida: $idSucursal");
+        }
+
+        // Verificar estado simulado antes de intentar la conexión real
+        if (self::estaOffline($idSucursal)) {
+            $nombre = self::$config[$idSucursal]['nombre'];
+            throw new RuntimeException("$nombre está OFFLINE (falla simulada). Nodo no disponible.");
         }
 
         $cfg = self::$config[$idSucursal];
@@ -33,6 +42,28 @@ class ConexionNodos
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_TIMEOUT            => 1, // si el nodo no responde en 1s, se considera caído
         ]);
+    }
+
+    public static function estaOffline(int $idSucursal): bool
+    {
+        if (!file_exists(self::ESTADO_FILE)) {
+            return false;
+        }
+        $estados = json_decode(file_get_contents(self::ESTADO_FILE), true) ?? [];
+        return ($estados[$idSucursal] ?? 'online') === 'offline';
+    }
+
+    public static function estadosTodos(): array
+    {
+        $estados = [];
+        if (file_exists(self::ESTADO_FILE)) {
+            $estados = json_decode(file_get_contents(self::ESTADO_FILE), true) ?? [];
+        }
+        $result = [];
+        foreach (array_keys(self::$config) as $id) {
+            $result[$id] = ($estados[$id] ?? 'online');
+        }
+        return $result;
     }
 
     public static function nombre(int $idSucursal): string

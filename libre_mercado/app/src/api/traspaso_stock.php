@@ -81,11 +81,18 @@ try {
         'mensaje' => "Traspaso confirmado: $cantidad unidades de " . ConexionNodos::nombre($idOrigen) . " -> " . ConexionNodos::nombre($idDestino) . ".",
     ]);
 
-} catch (Throwable $e) {
+} catch (RuntimeException $e) {
     // Rollback en cualquier nodo que haya alcanzado a abrir transaccion
     if ($pdoOrigen && $pdoOrigen->inTransaction())  $pdoOrigen->rollBack();
     if ($pdoDestino && $pdoDestino->inTransaction()) $pdoDestino->rollBack();
 
     http_response_code(409);
     echo json_encode(['ok' => false, 'mensaje' => 'Traspaso cancelado (rollback en ambos nodos): ' . $e->getMessage()]);
+} catch (Throwable $e) {
+    if ($pdoOrigen && $pdoOrigen->inTransaction())  $pdoOrigen->rollBack();
+    if ($pdoDestino && $pdoDestino->inTransaction()) $pdoDestino->rollBack();
+
+    error_log('traspaso_stock: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'mensaje' => 'Ocurrió un error al procesar el traspaso. Intenta nuevamente.']);
 }

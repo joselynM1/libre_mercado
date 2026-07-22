@@ -49,7 +49,11 @@ class MultiNodo
             }
         } catch (Throwable $e) {
             self::rollbackTodos($conexiones);
-            throw new RuntimeException('Operación cancelada (rollback en los 3 nodos): ' . $e->getMessage());
+            if ($e instanceof RuntimeException) {
+                throw $e;
+            }
+            error_log('MultiNodo::ejecutar: ' . $e->getMessage());
+            throw new RuntimeException('Operación cancelada (rollback en los 3 nodos). Intenta nuevamente.');
         }
 
         // 3) Confirmar en todos (fase "commit").

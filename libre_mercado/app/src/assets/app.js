@@ -330,13 +330,15 @@ async function confirmarCompra(idMsg = 'msg-carrito') {
 
     if (CARRITO.length === 0) return;
 
-    // En la pasarela, validamos los datos de facturación (simulación de validación previa a la transacción ACID)
+    // Validar nombre y email en la pasarela
+    let nombreComprador = '';
+    let emailComprador  = '';
     if (idMsg === 'msg-checkout') {
-        const nombre = document.getElementById('checkout-nombre').value.trim();
-        const email = document.getElementById('checkout-email').value.trim();
-        if (!nombre || !email) {
+        nombreComprador = document.getElementById('checkout-nombre').value.trim();
+        emailComprador  = document.getElementById('checkout-email').value.trim();
+        if (!nombreComprador || !emailComprador) {
             msg.classList.add('error');
-            msg.textContent = 'Completa el nombre y el correo del comprador antes de confirmar.';
+            msg.textContent = 'Completa el nombre y el correo antes de confirmar.';
             return;
         }
     }
@@ -347,9 +349,6 @@ async function confirmarCompra(idMsg = 'msg-carrito') {
     btn.disabled = true;
     btn.textContent = 'Procesando...';
 
-    // Cliente fijo de demostración (cliente registrado en la BD: id_usuario = 1)
-    const ID_CLIENTE_DEMO = 1;
-
     const resultados = [];
     for (const item of [...CARRITO]) {
         try {
@@ -358,9 +357,10 @@ async function confirmarCompra(idMsg = 'msg-carrito') {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     id_sucursal: item.id_sucursal,
-                    id_cliente: ID_CLIENTE_DEMO,
+                    nombre:      nombreComprador || null,
+                    email:       emailComprador  || null,
                     id_producto: item.id_producto,
-                    cantidad: item.cantidad,
+                    cantidad:    item.cantidad,
                 }),
             });
             const data = await res.json();

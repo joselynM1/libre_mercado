@@ -159,3 +159,187 @@ INSERT INTO detalle_ventas (id_detalle, id_venta, id_producto, cantidad, precio_
 (8,11,1,1,850000.0,850000.0),
 (9,12,2,1,550000.0,550000.0),
 (10,12,1,1,850000.0,850000.0);
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS
+-- ============================================================
+
+DELIMITER $$
+
+-- sp_realizar_compra: valida stock, inserta venta, actualiza inventario y controla errores
+DROP PROCEDURE IF EXISTS sp_realizar_compra$$
+CREATE PROCEDURE sp_realizar_compra(
+    IN  p_id_sucursal INT,
+    IN  p_id_cliente  INT,
+    IN  p_id_producto INT,
+    IN  p_cantidad    INT,
+    OUT p_resultado   TINYINT,
+    OUT p_mensaje     VARCHAR(255)
+)
+BEGIN
+    DECLARE v_stock   INT          DEFAULT 0;
+    DECLARE v_precio  DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_total   DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_id_venta INT         DEFAULT 0;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = 'Error interno en la transacción. Rollback ejecutado.';
+    END;
+
+    START TRANSACTION;
+
+    -- Validar stock con bloqueo para evitar condiciones de carrera
+    SELECT cantidad INTO v_stock
+    FROM stock
+    WHERE id_sucursal = p_id_sucursal AND id_producto = p_id_producto
+    FOR UPDATE;
+
+    IF v_stock IS NULL THEN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = 'Producto no disponible en esta sucursal.';
+
+    ELSEIF v_stock < p_cantidad THEN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = CONCAT('Stock insuficiente. Disponible: ', v_stock, ' unidades.');
+
+    ELSE
+        SELECT precio_unitario INTO v_precio
+        FROM productos WHERE id_producto = p_id_producto;
+
+        SET v_total = v_precio * p_cantidad;
+
+        INSERT INTO ventas (id_cliente, id_sucursal, total, fecha, estado)
+        VALUES (p_id_cliente, p_id_sucursal, v_total, NOW(), 'completada');
+
+        SET v_id_venta = LAST_INSERT_ID();
+
+        INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, subtotal)
+        VALUES (v_id_venta, p_id_producto, p_cantidad, v_precio, v_total);
+
+        UPDATE stock
+        SET cantidad = cantidad - p_cantidad, actualizado_en = NOW()
+        WHERE id_sucursal = p_id_sucursal AND id_producto = p_id_producto;
+
+        COMMIT;
+        SET p_resultado = 1;
+        SET p_mensaje   = CONCAT('Venta registrada. ID: ', v_id_venta, '. Total: $', FORMAT(v_total, 0));
+    END IF;
+END$$
+
+-- sp_actualizar_stock: recibe producto, cantidad y operación (sumar/restar) y modifica existencia
+DROP PROCEDURE IF EXISTS sp_actualizar_stock$$
+CREATE PROCEDURE sp_actualizar_stock(
+    IN  p_id_sucursal INT,
+    IN  p_id_producto INT,
+    IN  p_cantidad    INT,
+    IN  p_operacion   VARCHAR(10),
+    OUT p_resultado   TINYINT,
+    OUT p_mensaje     VARCHAR(255)
+)
+BEGIN
+    DECLARE v_actual INT DEFAULT 0;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = 'Error al actualizar stock. Rollback ejecutado.';
+    END;
+
+    START TRANSACTION;
+
+    SELECT cantidad INTO v_actual
+    FROM stock
+    WHERE id_sucursal = p_id_sucursal AND id_producto = p_id_producto
+    FOR UPDATE;
+
+    IF v_actual IS NULL THEN
+        -- No existe registro: insertar con la cantidad inicial
+        INSERT INTO stock (id_sucursal, id_producto, cantidad, actualizado_en)
+        VALUES (p_id_sucursal, p_id_producto, p_cantidad, NOW());
+
+        COMMIT;
+        SET p_resultado = 1;
+        SET p_mensaje   = CONCAT('Stock creado con cantidad inicial: ', p_cantidad);
+
+    ELSEIF p_operacion = 'restar' AND v_actual < p_cantidad THEN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = CONCAT('Stock insuficiente para restar. Disponible: ', v_actual);
+
+    ELSEIF p_operacion = 'sumar' THEN
+        UPDATE stock
+        SET cantidad = cantidad + p_cantidad, actualizado_en = NOW()
+        WHERE id_sucursal = p_id_sucursal AND id_producto = p_id_producto;
+
+        COMMIT;
+        SET p_resultado = 1;
+        SET p_mensaje   = CONCAT('Stock incrementado. Nueva cantidad: ', v_actual + p_cantidad);
+
+    ELSE
+        UPDATE stock
+        SET cantidad = cantidad - p_cantidad, actualizado_en = NOW()
+        WHERE id_sucursal = p_id_sucursal AND id_producto = p_id_producto;
+
+        COMMIT;
+        SET p_resultado = 1;
+        SET p_mensaje   = CONCAT('Stock decrementado. Nueva cantidad: ', v_actual - p_cantidad);
+    END IF;
+END$$
+
+-- sp_reconstruir_stock: recalcula el stock de una sucursal desde cero basándose en compras y ventas
+DROP PROCEDURE IF EXISTS sp_reconstruir_stock$$
+CREATE PROCEDURE sp_reconstruir_stock(
+    IN  p_id_sucursal INT,
+    OUT p_resultado   TINYINT,
+    OUT p_mensaje     VARCHAR(255)
+)
+BEGIN
+    DECLARE v_filas INT DEFAULT 0;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_resultado = 0;
+        SET p_mensaje   = 'Error durante la reconstrucción de stock. Rollback ejecutado.';
+    END;
+
+    START TRANSACTION;
+
+    -- Recalcula cantidad = total comprado - total vendido para cada producto
+    UPDATE stock s
+    SET s.cantidad = (
+            COALESCE((
+                SELECT SUM(dc.cantidad)
+                FROM detalle_compras dc
+                JOIN compras c ON dc.id_compra = c.id_compra
+                WHERE c.id_sucursal = p_id_sucursal
+                  AND dc.id_producto = s.id_producto
+                  AND c.estado = 'recibida'
+            ), 0)
+            -
+            COALESCE((
+                SELECT SUM(dv.cantidad)
+                FROM detalle_ventas dv
+                JOIN ventas v ON dv.id_venta = v.id_venta
+                WHERE v.id_sucursal = p_id_sucursal
+                  AND dv.id_producto = s.id_producto
+                  AND v.estado = 'completada'
+            ), 0)
+        ),
+        s.actualizado_en = NOW()
+    WHERE s.id_sucursal = p_id_sucursal;
+
+    SET v_filas = ROW_COUNT();
+    COMMIT;
+    SET p_resultado = 1;
+    SET p_mensaje   = CONCAT('Stock reconstruido para sucursal ', p_id_sucursal,
+                             '. Productos actualizados: ', v_filas);
+END$$
+
+DELIMITER ;

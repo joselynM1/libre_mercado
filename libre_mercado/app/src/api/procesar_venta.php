@@ -1,20 +1,29 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require __DIR__ . '/../ConexionNodos.php';
+require __DIR__ . '/../MultiNodo.php';
 
 $input = json_decode(file_get_contents('php://input'), true);
 
 $idSucursal = (int)($input['id_sucursal'] ?? 0);
-$idCliente  = (int)($input['id_cliente'] ?? 0);
 $idProducto = (int)($input['id_producto'] ?? 0);
-$cantidad   = (int)($input['cantidad'] ?? 0);
+$cantidad   = (int)($input['cantidad']    ?? 0);
+$nombre     = trim($input['nombre'] ?? '');
+$email      = trim($input['email']  ?? '');
 
-if (!$idSucursal || !$idCliente || !$idProducto || $cantidad <= 0) {
+if (!$idSucursal || !$idProducto || $cantidad <= 0) {
     http_response_code(400);
     echo json_encode(['ok' => false, 'mensaje' => 'Datos incompletos']);
     exit;
 }
 
+if (!$nombre || !$email) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'mensaje' => 'Nombre y correo son obligatorios.']);
+    exit;
+}
+
+// Verificar estado simulado del nodo antes de cualquier operación
 try {
     $pdo = ConexionNodos::get($idSucursal);
 } catch (Throwable $e) {
@@ -23,52 +32,62 @@ try {
     exit;
 }
 
+// Buscar cliente por email en el nodo local; si no existe, crearlo en los 3 nodos
 try {
-    $pdo->beginTransaction();
+    $stmt = $pdo->prepare("SELECT id_usuario FROM usuarios WHERE email = ?");
+    $stmt->execute([$email]);
+    $idCliente = $stmt->fetchColumn();
 
-    // Bloqueamos la fila de stock para evitar condiciones de carrera
-    $stmt = $pdo->prepare("SELECT cantidad FROM stock WHERE id_producto = ? FOR UPDATE");
-    $stmt->execute([$idProducto]);
-    $stockActual = $stmt->fetchColumn();
+    if (!$idCliente) {
+        // Registrar cliente nuevo en los 3 nodos (catálogo replicado)
+        MultiNodo::ejecutar(function (PDO $conn) use ($nombre, $email) {
+            $existe = $conn->prepare("SELECT id_usuario FROM usuarios WHERE email = ?");
+            $existe->execute([$email]);
+            if (!$existe->fetchColumn()) {
+                $conn->prepare(
+                    "INSERT INTO usuarios (nombre, email, password_hash, rol, activo) VALUES (?, ?, '', 'cliente', 1)"
+                )->execute([$nombre, $email]);
+            }
+        });
 
-    if ($stockActual === false) {
-        throw new RuntimeException('El producto no tiene registro de stock en esta sucursal.');
+        // Leer el id recién creado desde el nodo local
+        $stmt = $pdo->prepare("SELECT id_usuario FROM usuarios WHERE email = ?");
+        $stmt->execute([$email]);
+        $idCliente = (int)$stmt->fetchColumn();
     }
-    if ($stockActual < $cantidad) {
-        throw new RuntimeException("Stock insuficiente en " . ConexionNodos::nombre($idSucursal) . " (disponible: $stockActual).");
-    }
+} catch (RuntimeException $e) {
+    http_response_code(503);
+    echo json_encode(['ok' => false, 'mensaje' => 'No se pudo registrar el cliente: ' . $e->getMessage()]);
+    exit;
+} catch (Throwable $e) {
+    error_log('procesar_venta (registro cliente): ' . $e->getMessage());
+    http_response_code(503);
+    echo json_encode(['ok' => false, 'mensaje' => 'Ocurrió un error al registrar el cliente. Intenta nuevamente.']);
+    exit;
+}
 
-    // Descontar stock
-    $pdo->prepare("UPDATE stock SET cantidad = cantidad - ? WHERE id_producto = ?")
-        ->execute([$cantidad, $idProducto]);
-
-    // Precio del producto
-    $stmt = $pdo->prepare("SELECT precio_unitario, producto FROM productos WHERE id_producto = ?");
-    $stmt->execute([$idProducto]);
-    $prod = $stmt->fetch();
-    $precio = (float)$prod['precio_unitario'];
-    $subtotal = $precio * $cantidad;
-
-    // Registrar venta
-    $pdo->prepare("INSERT INTO ventas (id_cliente, id_sucursal, total, fecha, estado) VALUES (?, ?, ?, NOW(), 'completada')")
-        ->execute([$idCliente, $idSucursal, $subtotal]);
-    $idVenta = (int)$pdo->lastInsertId();
-
-    // Registrar detalle
-    $pdo->prepare("INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)")
-        ->execute([$idVenta, $idProducto, $cantidad, $precio, $subtotal]);
-
-    $pdo->commit();
-
-    echo json_encode([
-        'ok' => true,
-        'mensaje' => "Venta #$idVenta registrada en " . ConexionNodos::nombre($idSucursal) . ": $cantidad x {$prod['producto']}.",
-        'id_venta' => $idVenta,
-        'stock_restante' => $stockActual - $cantidad,
+// Ejecutar la venta mediante el stored procedure
+try {
+    $stmt = $pdo->prepare("CALL sp_realizar_compra(:suc, :cli, :prod, :cant, @resultado, @mensaje)");
+    $stmt->execute([
+        ':suc'  => $idSucursal,
+        ':cli'  => $idCliente,
+        ':prod' => $idProducto,
+        ':cant' => $cantidad,
     ]);
 
+    $out = $pdo->query("SELECT @resultado AS resultado, @mensaje AS mensaje")
+                ->fetch(PDO::FETCH_ASSOC);
+
+    if ((int)$out['resultado'] === 1) {
+        echo json_encode(['ok' => true, 'mensaje' => $out['mensaje']]);
+    } else {
+        http_response_code(409);
+        echo json_encode(['ok' => false, 'mensaje' => $out['mensaje']]);
+    }
+
 } catch (Throwable $e) {
-    $pdo->rollBack();
-    http_response_code(409);
-    echo json_encode(['ok' => false, 'mensaje' => $e->getMessage()]);
+    error_log('procesar_venta (sp_realizar_compra): ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'mensaje' => 'Ocurrió un error al procesar la compra. Intenta nuevamente.']);
 }

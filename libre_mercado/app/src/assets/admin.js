@@ -16,9 +16,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Cerrar modales
+    // Cerrar modales (incluye modal-historial que no tiene form que resetear)
     document.querySelectorAll('[data-cerrar-modal]').forEach(btn => {
-        btn.addEventListener('click', () => cerrarModal(btn.dataset.cerrarModal));
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.cerrarModal;
+            document.getElementById(id).classList.remove('visible');
+            const form = document.getElementById('form-' + id.replace('modal-', ''));
+            if (form) form.reset();
+        });
     });
 
     // Botones "Nuevo"
@@ -46,6 +51,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Traspasos entre sucursales
     document.getElementById('form-traspaso').addEventListener('submit', procesarTraspaso);
+
+    // Ajuste manual de stock (sp_actualizar_stock)
+    document.getElementById('form-ajuste-stock').addEventListener('submit', procesarAjusteStock);
+
+    // Historial de ventas: carga al abrir el tab o al pulsar actualizar
+    document.querySelector('[data-tab="historial-ventas"]').addEventListener('click', cargarHistorialVentas);
+    document.getElementById('btn-refrescar-historial').addEventListener('click', cargarHistorialVentas);
+
+    // Simulación de nodos: carga al abrir el tab
+    document.querySelector('[data-tab="nodos"]').addEventListener('click', cargarEstadoNodosPanel);
 });
 
 /* ---------------- Estado de nodos ---------------- */
@@ -195,9 +210,13 @@ async function cargarClientes() {
                     <button class="btn-mini" data-accion="editar">Editar</button>
                     <button class="btn-mini ${u.activo ? 'danger' : ''}" data-accion="toggle">${u.activo ? 'Dar de baja' : 'Reactivar'}</button>
                 </td>
+                <td>
+                    <button class="btn-mini" data-accion="historial">Ver compras</button>
+                </td>
             `;
             tr.querySelector('[data-accion="editar"]').addEventListener('click', () => abrirModalCliente(u));
             tr.querySelector('[data-accion="toggle"]').addEventListener('click', () => toggleCliente(u));
+            tr.querySelector('[data-accion="historial"]').addEventListener('click', () => abrirHistorialCliente(u));
             tbody.appendChild(tr);
         });
     } catch (e) {
@@ -364,6 +383,7 @@ async function cargarDatosReabastecimiento() {
             const opciones = PRODUCTOS_ACTIVOS.map(p => `<option value="${p.id_producto}">${p.producto}</option>`).join('');
             document.getElementById('item-producto').innerHTML = opciones;
             document.getElementById('traspaso-producto').innerHTML = opciones;
+            document.getElementById('ajuste-producto').innerHTML = opciones;
         }
     } catch (e) { /* silencioso */ }
 
@@ -524,6 +544,227 @@ async function cargarHistorialCompras() {
 }
 
 /* ================= TRASPASOS ENTRE SUCURSALES (2PC) ================= */
+
+/* ================= AJUSTE MANUAL DE STOCK (sp_actualizar_stock) ================= */
+
+async function procesarAjusteStock(ev) {
+    ev.preventDefault();
+    const msg = document.getElementById('msg-ajuste-stock');
+    msg.className = 'mensaje';
+
+    const body = {
+        id_sucursal: parseInt(document.getElementById('ajuste-sucursal').value, 10),
+        id_producto: parseInt(document.getElementById('ajuste-producto').value, 10),
+        cantidad: parseInt(document.getElementById('ajuste-cantidad').value, 10),
+        operacion: document.getElementById('ajuste-operacion').value,
+    };
+
+    const btn = ev.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = 'Aplicando...';
+
+    try {
+        const res = await fetch('api/ajustar_stock.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+
+        msg.classList.add(data.ok ? 'ok' : 'error');
+        msg.textContent = data.mensaje;
+        if (data.ok) cargarEstadoNodos();
+    } catch (e) {
+        msg.classList.add('error');
+        msg.textContent = 'Error de conexión con el servidor.';
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Aplicar ajuste';
+}
+
+/* ================= HISTORIAL GLOBAL DE VENTAS ================= */
+
+async function cargarHistorialVentas() {
+    const tbody  = document.getElementById('tbody-historial-ventas');
+    const errDiv = document.getElementById('historial-ventas-errores');
+    tbody.innerHTML = '<tr><td colspan="8">Consultando los 3 nodos...</td></tr>';
+    errDiv.style.display = 'none';
+
+    try {
+        const res  = await fetch('api/ventas_todas.php');
+        const data = await res.json();
+
+        if (data.errores && data.errores.length > 0) {
+            errDiv.style.display = '';
+            errDiv.textContent = 'Nodos no disponibles: ' + data.errores.join(' | ');
+        }
+
+        if (!data.ventas || data.ventas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted)">No hay ventas registradas aún.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        data.ventas.forEach(v => {
+            const fecha = new Date(v.fecha.replace(' ', 'T')).toLocaleString('es-CL');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>#${v.id_venta}</td>
+                <td style="white-space:nowrap">${fecha}</td>
+                <td><strong>${v.cliente}</strong></td>
+                <td style="font-size:0.82rem; color:var(--muted)">${v.email_cliente}</td>
+                <td><span class="estado-pill activo-si" style="font-size:0.78rem">${v.sucursal}</span></td>
+                <td style="font-size:0.82rem; color:var(--muted); max-width:260px">${v.detalle}</td>
+                <td><strong>$${Number(v.total).toLocaleString('es-CL')}</strong></td>
+                <td><span class="estado-pill activo-si">${capitalizar(v.estado)}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="color:#E25C5C">Error al cargar el historial.</td></tr>';
+    }
+}
+
+/* ================= HISTORIAL DE COMPRAS POR CLIENTE ================= */
+
+async function abrirHistorialCliente(u) {
+    document.getElementById('titulo-modal-historial').textContent = `Compras de ${u.nombre}`;
+    document.getElementById('tbody-historial-cliente').innerHTML = '<tr><td colspan="6">Cargando desde los 3 nodos...</td></tr>';
+    document.getElementById('historial-errores').style.display = 'none';
+    abrirModal('modal-historial');
+
+    try {
+        const res  = await fetch('api/ventas_cliente.php?id_cliente=' + u.id_usuario);
+        const data = await res.json();
+
+        const errDiv = document.getElementById('historial-errores');
+        if (data.errores && data.errores.length > 0) {
+            errDiv.style.display = '';
+            errDiv.textContent = 'Nodos no disponibles: ' + data.errores.join(' | ');
+        }
+
+        const tbody = document.getElementById('tbody-historial-cliente');
+        if (!data.ventas || data.ventas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">Este cliente aún no tiene compras registradas.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        data.ventas.forEach(v => {
+            const fecha = new Date(v.fecha.replace(' ', 'T')).toLocaleString('es-CL');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>#${v.id_venta}</td>
+                <td>${fecha}</td>
+                <td>${v.sucursal}</td>
+                <td style="font-size:0.83rem; color:var(--muted)">${v.detalle}</td>
+                <td>$${Number(v.total).toLocaleString('es-CL')}</td>
+                <td><span class="estado-pill activo-si">${capitalizar(v.estado)}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        document.getElementById('tbody-historial-cliente').innerHTML =
+            '<tr><td colspan="6" style="color:#E25C5C">Error al cargar el historial.</td></tr>';
+    }
+}
+
+/* ================= SIMULACIÓN DE NODOS ================= */
+
+const SUC_IDS = [1, 2, 3];
+
+async function cargarEstadoNodosPanel() {
+    try {
+        const res  = await fetch('api/nodo_estado.php');
+        const data = await res.json();
+        if (!data.ok) return;
+        renderPanelNodos(data.estados);
+    } catch (e) { /* silencioso */ }
+}
+
+function renderPanelNodos(estados) {
+    const cont = document.getElementById('panel-nodos');
+    cont.innerHTML = '';
+
+    SUC_IDS.forEach(id => {
+        const online  = estados[id] === 'online';
+        const nombre  = SUC_NOMBRES[id];
+        const card    = document.createElement('div');
+        card.className = 'nodo-sim-card ' + (online ? 'nodo-ok' : 'nodo-caido');
+        card.innerHTML = `
+            <div class="nodo-sim-nombre">${nombre}</div>
+            <div class="nodo-sim-estado">
+                <span class="dot"></span>
+                <span class="nodo-sim-label">${online ? 'ONLINE' : 'OFFLINE'}</span>
+            </div>
+            <div class="nodo-sim-acciones">
+                <button class="btn-nodo-toggle ${online ? 'danger' : 'btn-recuperar'}" data-id="${id}" data-accion="${online ? 'offline' : 'online'}">
+                    ${online ? 'Simular Falla' : 'Recuperar Nodo'}
+                </button>
+                ${!online ? `<button class="btn-secundario btn-reconstruir" data-id="${id}" style="margin-top:8px;">Reconstruir Stock (sp)</button>` : ''}
+            </div>
+        `;
+
+        card.querySelector('.btn-nodo-toggle').addEventListener('click', toggleNodo);
+        if (!online) {
+            card.querySelector('.btn-reconstruir').addEventListener('click', reconstruirStock);
+        }
+
+        cont.appendChild(card);
+    });
+}
+
+async function toggleNodo(ev) {
+    const btn         = ev.currentTarget;
+    const idSucursal  = parseInt(btn.dataset.id, 10);
+    const nuevoEstado = btn.dataset.accion; // 'online' o 'offline'
+
+    btn.disabled    = true;
+    btn.textContent = 'Procesando...';
+
+    try {
+        const res  = await fetch('api/nodo_estado.php', {
+            method:  'POST',
+            headers: {'Content-Type': 'application/json'},
+            body:    JSON.stringify({ id_sucursal: idSucursal, estado: nuevoEstado }),
+        });
+        const data = await res.json();
+
+        mostrarMensaje('msg-nodos', data.ok, data.mensaje);
+        if (data.ok) {
+            renderPanelNodos(data.estados);
+            cargarEstadoNodos(); // refresca los pills del header
+        }
+    } catch (e) {
+        mostrarMensaje('msg-nodos', false, 'Error de conexión al cambiar estado del nodo.');
+        btn.disabled    = false;
+        btn.textContent = nuevoEstado === 'offline' ? 'Simular Falla' : 'Recuperar Nodo';
+    }
+}
+
+async function reconstruirStock(ev) {
+    const btn        = ev.currentTarget;
+    const idSucursal = parseInt(btn.dataset.id, 10);
+
+    btn.disabled    = true;
+    btn.textContent = 'Reconstruyendo...';
+
+    try {
+        const res  = await fetch('api/reconstruir_stock.php', {
+            method:  'POST',
+            headers: {'Content-Type': 'application/json'},
+            body:    JSON.stringify({ id_sucursal: idSucursal }),
+        });
+        const data = await res.json();
+        mostrarMensaje('msg-nodos', data.ok, data.mensaje);
+    } catch (e) {
+        mostrarMensaje('msg-nodos', false, 'Error al reconstruir stock.');
+    }
+
+    btn.disabled    = false;
+    btn.textContent = 'Reconstruir Stock (sp)';
+}
 
 async function procesarTraspaso(ev) {
     ev.preventDefault();

@@ -41,6 +41,9 @@
             <button class="tab-btn" data-tab="proveedores">Proveedores</button>
             <button class="tab-btn" data-tab="compras">Reabastecimiento</button>
             <button class="tab-btn" data-tab="traspasos">Traspasos entre Sucursales</button>
+            <button class="tab-btn" data-tab="ajuste-stock">Ajuste de Stock</button>
+            <button class="tab-btn" data-tab="historial-ventas">Historial de Ventas</button>
+            <button class="tab-btn tab-btn-danger" data-tab="nodos">Simular Falla de Nodos</button>
         </div>
 
         <!-- Productos -->
@@ -85,6 +88,7 @@
                             <th>Rol</th>
                             <th>Estado</th>
                             <th>Acciones</th>
+                            <th>Historial</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-clientes">
@@ -252,6 +256,98 @@
                 <div id="msg-traspaso" class="mensaje"></div>
             </div>
         </div>
+        <!-- Ajuste manual de stock (sp_actualizar_stock) -->
+        <div class="tab-panel" id="tab-ajuste-stock">
+            <div class="barra-admin">
+                <h2>Ajuste de Stock</h2>
+            </div>
+            <div class="tabla-admin-wrap" style="padding:22px;">
+                <p class="desc" style="margin-top:0; color:var(--muted); font-size:0.88rem;">
+                    Corrección manual de inventario (por ejemplo, tras un conteo físico o un error de
+                    carga). Llama directamente a <code>sp_actualizar_stock()</code>, que valida la
+                    existencia y aplica el ajuste dentro de su propia transacción.
+                </p>
+                <form id="form-ajuste-stock" class="form-grid">
+                    <div>
+                        <label>Sucursal</label>
+                        <select id="ajuste-sucursal" required>
+                            <option value="1">Sucursal Norte</option>
+                            <option value="2">Sucursal Centro</option>
+                            <option value="3">Sucursal Sur</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Producto</label>
+                        <select id="ajuste-producto" required></select>
+                    </div>
+                    <div>
+                        <label>Cantidad</label>
+                        <input type="number" id="ajuste-cantidad" min="1" value="1" required>
+                    </div>
+                    <div>
+                        <label>Operación</label>
+                        <select id="ajuste-operacion" required>
+                            <option value="sumar">Sumar</option>
+                            <option value="restar">Restar</option>
+                        </select>
+                    </div>
+                    <div>
+                        <button type="submit">Aplicar ajuste</button>
+                    </div>
+                </form>
+                <div id="msg-ajuste-stock" class="mensaje"></div>
+            </div>
+        </div>
+
+        <!-- Historial global de ventas -->
+        <div class="tab-panel" id="tab-historial-ventas">
+            <div class="barra-admin">
+                <h2>Historial de Ventas</h2>
+                <button class="btn-nuevo" id="btn-refrescar-historial">↻ Actualizar</button>
+            </div>
+            <div id="historial-ventas-errores" class="mensaje error" style="display:none; margin-bottom:12px;"></div>
+            <div class="tabla-admin-wrap">
+                <table class="tabla-admin" id="tabla-historial-ventas">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Fecha</th>
+                            <th>Cliente</th>
+                            <th>Email</th>
+                            <th>Sucursal</th>
+                            <th>Productos</th>
+                            <th>Total</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-historial-ventas">
+                        <tr><td colspan="8">Selecciona la pestaña para cargar...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Simulación de caída de nodos (Req 4 / Teorema CAP) -->
+        <div class="tab-panel" id="tab-nodos">
+            <div class="barra-admin">
+                <h2>Simulación de Caída de Nodos</h2>
+            </div>
+
+            <div class="tabla-admin-wrap" style="padding:22px;">
+                <p class="desc" style="margin-top:0; color:var(--muted); font-size:0.88rem;">
+                    Aquí puedes simular que una sucursal queda <strong>OFFLINE</strong> (falla de nodo / partición de red).
+                    Mientras un nodo esté OFFLINE, cualquier operación que lo requiera será rechazada con rollback
+                    (modelo <strong>CP</strong>: consistencia sobre disponibilidad). Al recuperar el nodo, puedes
+                    reconstruir su stock ejecutando <code>sp_reconstruir_stock()</code>.
+                </p>
+
+                <div id="panel-nodos" class="nodos-sim-grid">
+                    <!-- Generado por admin.js -->
+                </div>
+
+                <div id="msg-nodos" class="mensaje" style="margin-top:18px;"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal: Producto -->
@@ -382,6 +478,34 @@
                     <button type="submit" class="btn-primario">Guardar</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Historial de compras por cliente -->
+    <div class="modal-overlay" id="modal-historial">
+        <div class="modal-box" style="max-width:680px; width:95%;">
+            <h2 id="titulo-modal-historial">Compras del cliente</h2>
+            <div id="historial-errores" class="mensaje error" style="display:none; margin-bottom:12px;"></div>
+            <div class="tabla-admin-wrap" style="max-height:420px; overflow-y:auto;">
+                <table class="tabla-admin">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Fecha</th>
+                            <th>Sucursal</th>
+                            <th>Productos</th>
+                            <th>Total</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-historial-cliente">
+                        <tr><td colspan="6">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-acciones">
+                <button type="button" class="btn-primario" data-cerrar-modal="modal-historial">Cerrar</button>
+            </div>
         </div>
     </div>
 

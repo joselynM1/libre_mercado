@@ -838,3 +838,74 @@ body {
     font-size: 0.9rem;
 }
 .volver-link:hover { color: var(--text); }
+
+/* ===== Simulación de nodos ===== */
+.tab-btn-danger { border-bottom: 3px solid var(--danger) !important; }
+.tab-btn-danger.activo { color: var(--danger) !important; }
+
+.nodos-sim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+    margin-top: 10px;
+}
+
+.nodo-sim-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 2px solid var(--border);
+    padding: 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: border-color 0.2s;
+}
+.nodo-sim-card.nodo-ok  { border-color: var(--ok); }
+.nodo-sim-card.nodo-caido { border-color: var(--danger); background: #fff5f5; }
+
+.nodo-sim-nombre {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.nodo-sim-estado {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.nodo-sim-label { font-size: 0.82rem; font-weight: 700; letter-spacing: 0.04em; }
+.nodo-ok  .nodo-sim-label { color: var(--ok); }
+.nodo-caido .nodo-sim-label { color: var(--danger); }
+.nodo-ok  .dot { background: var(--ok); }
+.nodo-caido .dot { background: var(--danger); }
+
+.nodo-sim-acciones { display: flex; flex-direction: column; gap: 8px; }
+
+.btn-nodo-toggle {
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: none;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.btn-nodo-toggle.danger    { background: var(--danger); color: #fff; }
+.btn-nodo-toggle.btn-recuperar { background: var(--ok); color: #fff; }
+.btn-nodo-toggle:hover { opacity: 0.85; }
+.btn-nodo-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-reconstruir {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--card);
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 0.82rem;
+    cursor: pointer;
+    color: var(--text);
+}
+.btn-reconstruir:hover { border-color: var(--accent); color: var(--accent); }
+.btn-reconstruir:disabled { opacity: 0.5; cursor: not-allowed; }

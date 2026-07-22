@@ -1,0 +1,400 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    citecolor=black,
+    pdftitle={Documento Tecnico - Libre Mercado Distribuido}
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    columns=fullflexible,
+    frame=single,
+    backgroundcolor=\color{gray!8},
+    xleftmargin=0pt,
+    xrightmargin=0pt
+}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{Documento Técnico --- Libre Mercado Distribuido}}
+\author{Sistemas Distribuidos --- 2026 \\ % TODO: agregar nombre(s) del/los autor(es)
+\textit{Nombre Apellido}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Arquitectura del Sistema}
+% ============================================================
+
+\subsection{Visión General}
+
+Libre Mercado implementa una arquitectura distribuida de \textbf{3 nodos de base de datos independientes}, uno por sucursal, coordinados por una única capa de aplicación PHP. Cada nodo es una instancia MariaDB ejecutándose en su propio contenedor Docker, aislada de las demás.
+
+\begin{lstlisting}
+                    +----------------------+
+                    |      Cliente Web     |
+                    |  (Navegador / AJAX)  |
+                    +-----------+----------+
+                                | HTTP
+                    +-----------v----------+
+                    |     PHP + Apache     |
+                    |  (Nodo Coordinador)  |
+                    |   app:8080 (Docker)  |
+                    +--+--------+--------+-+
+                       |        |        |   PDO (red tienda_net)
+              +--------v--+ +---v-----+ +-v---------+
+              |  db_suc1  | | db_suc2 | |  db_suc3  |
+              |  MariaDB  | | MariaDB | |  MariaDB  |
+              | Suc.Norte | |Suc.Centro| | Suc. Sur |
+              | BD Local  | | BD Local | | BD Local |
+              +-----------+ +---------+ +-----------+
+\end{lstlisting}
+
+\subsection{Componentes}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Componente} & \textbf{Tecnología} & \textbf{Función} \\
+\midrule
+Frontend & HTML5 + JavaScript (AJAX) & Interfaz de tienda y administración \\
+Coordinador & PHP 8.2 + Apache & Lógica de negocio, coordinación de transacciones \\
+Nodo 1 & MariaDB 10.4 (\code{db\_suc1}) & Base de datos Sucursal Norte \\
+Nodo 2 & MariaDB 10.4 (\code{db\_suc2}) & Base de datos Sucursal Centro \\
+Nodo 3 & MariaDB 10.4 (\code{db\_suc3}) & Base de datos Sucursal Sur \\
+Red & Docker bridge (\code{tienda\_net}) & Comunicación entre contenedores \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Archivos Clave}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Archivo} & \textbf{Rol} \\
+\midrule
+\code{ConexionNodos.php} & Pool de conexiones PDO a los 3 nodos; detecta fallas simuladas y reales \\
+\code{MultiNodo.php} & Ejecutor de operaciones atómicas sobre los 3 nodos (2PC para catálogo) \\
+\code{api/procesar\_venta.php} & Llama a \code{sp\_realizar\_compra()} en el nodo de la sucursal \\
+\code{api/traspaso\_stock.php} & Two-Phase Commit entre dos nodos para traspasos de inventario \\
+\code{api/nodo\_estado.php} & Activa/desactiva fallas simuladas (Requisito 4) \\
+\code{api/reconstruir\_stock.php} & Llama a \code{sp\_reconstruir\_stock()} tras recuperar un nodo \\
+\code{api/ajustar\_stock.php} & Llama a \code{sp\_actualizar\_stock()} para ajustes manuales de inventario \\
+\code{sql/suc1.sql}, \code{suc2.sql}, \code{suc3.sql} & Schema, datos iniciales y procedimientos almacenados \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\newpage
+% ============================================================
+\section{Modelo Distribuido}
+% ============================================================
+
+\subsection{Estrategia de Distribución de Datos}
+
+Se usa una combinación de \textbf{particionamiento} y \textbf{replicación} según el tipo de dato:
+
+\textbf{Datos particionados (locales por nodo):}
+\begin{itemize}[nosep]
+    \item \code{stock} --- cada nodo tiene su propio inventario físico
+    \item \code{ventas} y \code{detalle\_ventas} --- cada sucursal registra solo sus ventas
+    \item \code{compras} y \code{detalle\_compras} --- cada sucursal gestiona su reabastecimiento
+\end{itemize}
+
+\textbf{Datos replicados (idénticos en los 3 nodos):}
+\begin{itemize}[nosep]
+    \item \code{productos} --- catálogo de artículos
+    \item \code{usuarios} y \code{clientes} --- base de clientes
+    \item \code{proveedores} --- catálogo de proveedores
+    \item \code{sucursales} --- lista maestra de sucursales
+\end{itemize}
+
+La replicación del catálogo se mantiene mediante operaciones atómicas multi-nodo coordinadas por \code{MultiNodo.php}: toda creación, edición o baja en catálogo se aplica a los 3 nodos dentro de una misma transacción distribuida; si algún nodo falla, se hace rollback completo en todos.
+
+\subsection{Flujo de una Compra Distribuida}
+
+\begin{lstlisting}
+Cliente -> selecciona producto -> agrega al carrito -> confirma compra
+                                                          |
+                             +----------------------------v------------------+
+                             |          PHP: procesar_venta.php              |
+                             |                                               |
+                             |  CALL sp_realizar_compra(suc, cli, prod, cant)|
+                             |                                               |
+                             |  +-----------------------------------------+  |
+                             |  |  MariaDB - Stored Procedure             |  |
+                             |  |  START TRANSACTION                      |  |
+                             |  |  SELECT cantidad ... FOR UPDATE         |  |
+                             |  |  IF stock < cantidad -> ROLLBACK        |  |
+                             |  |  INSERT INTO ventas ...                 |  |
+                             |  |  INSERT INTO detalle_ventas ...         |  |
+                             |  |  UPDATE stock SET cantidad - cant       |  |
+                             |  |  COMMIT                                 |  |
+                             |  +-----------------------------------------+  |
+                             +-----------------------------------------------+
+                                        |                    |
+                                  [Exito: 200]         [Error: 409/503]
+                                 Stock actualizado      Rollback automatico
+\end{lstlisting}
+
+\subsection{Flujo de un Traspaso (Two-Phase Commit)}
+
+\begin{lstlisting}
+Admin -> formulario traspaso -> envia a traspaso_stock.php
+                                        |
+                    +-------------------v------------------------+
+                    |         Two-Phase Commit (2PC)              |
+                    |                                              |
+                    |  FASE 1 - PREPARE                            |
+                    |  - beginTransaction() en nodo ORIGEN        |
+                    |      UPDATE stock SET cantidad - X           |
+                    |  - beginTransaction() en nodo DESTINO       |
+                    |      UPDATE stock SET cantidad + X           |
+                    |                                              |
+                    |  FASE 2 - COMMIT o ROLLBACK                  |
+                    |  Si ambas OK -> commit() en AMBOS nodos      |
+                    |  Si alguna falla -> rollback() en AMBOS      |
+                    +-----------------------------------------------+
+\end{lstlisting}
+
+\newpage
+% ============================================================
+\section{Procedimientos Almacenados}
+% ============================================================
+
+Los tres stored procedures están definidos en los archivos \code{sql/suc1.sql}, \code{suc2.sql} y \code{suc3.sql} (uno por nodo) y se crean automáticamente al inicializar los contenedores Docker.
+
+\subsection{\texttt{sp\_realizar\_compra}}
+
+\textbf{Parámetros:} \code{id\_sucursal}, \code{id\_cliente}, \code{id\_producto}, \code{cantidad}, \code{OUT resultado}, \code{OUT mensaje}
+
+\textbf{Lógica:}
+\begin{enumerate}[nosep]
+    \item \code{SELECT cantidad ... FOR UPDATE} --- bloqueo de fila para evitar condiciones de carrera en compras simultáneas
+    \item Valida que \code{cantidad\_disponible >= cantidad\_solicitada}; si no $\rightarrow$ \code{ROLLBACK}
+    \item \code{INSERT INTO ventas} $\rightarrow$ obtiene \code{LAST\_INSERT\_ID()}
+    \item \code{INSERT INTO detalle\_ventas}
+    \item \code{UPDATE stock SET cantidad = cantidad - p\_cantidad}
+    \item \code{COMMIT}
+    \item \code{EXIT HANDLER FOR SQLEXCEPTION} $\rightarrow$ \code{ROLLBACK} automático ante cualquier error inesperado
+\end{enumerate}
+
+\textbf{Llamada desde PHP (\code{procesar\_venta.php}):}
+\begin{lstlisting}[language=SQL]
+CALL sp_realizar_compra(:suc, :cli, :prod, :cant, @resultado, @mensaje);
+SELECT @resultado, @mensaje;
+\end{lstlisting}
+
+\subsection{\texttt{sp\_actualizar\_stock}}
+
+\textbf{Parámetros:} \code{id\_sucursal}, \code{id\_producto}, \code{cantidad}, \code{operacion ('sumar'|'restar')}, \code{OUT resultado}, \code{OUT mensaje}
+
+\textbf{Lógica:}
+\begin{itemize}[nosep]
+    \item Si no existe registro de stock $\rightarrow$ \code{INSERT} con cantidad inicial
+    \item Si \code{operacion = 'restar'} y \code{stock < cantidad} $\rightarrow$ \code{ROLLBACK}
+    \item Si \code{operacion = 'sumar'} $\rightarrow$ \code{UPDATE ... SET cantidad + p\_cantidad}
+    \item Si \code{operacion = 'restar'} y hay stock suficiente $\rightarrow$ \code{UPDATE ... SET cantidad - p\_cantidad}
+\end{itemize}
+
+Usado para ajustes administrativos de inventario (por ejemplo, tras un conteo físico). No abre transacción a nivel de PHP: como el procedimiento ya maneja su propia transacción, \code{ajustar\_stock.php} lo invoca directamente sin envolverlo en un \code{beginTransaction()} adicional.
+
+\textbf{Llamada desde PHP (\code{ajustar\_stock.php}):}
+\begin{lstlisting}[language=SQL]
+CALL sp_actualizar_stock(:suc, :prod, :cant, :op, @resultado, @mensaje);
+SELECT @resultado, @mensaje;
+\end{lstlisting}
+
+Accesible desde el panel de administración, pestaña \textbf{``Ajuste de Stock''}.
+
+\subsection{\texttt{sp\_reconstruir\_stock}}
+
+\textbf{Parámetros:} \code{id\_sucursal}, \code{OUT resultado}, \code{OUT mensaje}
+
+\textbf{Lógica:} Recalcula el stock de cada producto en una sucursal desde cero, aplicando la fórmula:
+
+\[
+\text{stock\_real} = \sum(\text{compras recibidas}) - \sum(\text{ventas completadas})
+\]
+
+\begin{lstlisting}[language=SQL]
+UPDATE stock s
+SET s.cantidad = (
+    COALESCE(SELECT SUM(dc.cantidad) FROM detalle_compras ... WHERE estado='recibida', 0)
+    -
+    COALESCE(SELECT SUM(dv.cantidad) FROM detalle_ventas  ... WHERE estado='completada', 0)
+)
+WHERE s.id_sucursal = p_id_sucursal;
+\end{lstlisting}
+
+Se llama al recuperar un nodo tras una falla, para corregir posibles desincronizaciones ocurridas mientras estuvo OFFLINE.
+
+\textbf{Llamada desde PHP (\code{reconstruir\_stock.php}):}
+\begin{lstlisting}[language=SQL]
+CALL sp_reconstruir_stock(:suc, @resultado, @mensaje);
+SELECT @resultado, @mensaje;
+\end{lstlisting}
+
+\newpage
+% ============================================================
+\section{Aplicación del Teorema CAP}
+% ============================================================
+
+\subsection{Elección: CP (Consistencia + Tolerancia a Particiones)}
+
+Ante una partición de red (un nodo deja de responder), el sistema prioriza la \textbf{consistencia} del inventario sobre la \textbf{disponibilidad total}.
+
+\textbf{Justificación:} En un sistema de control de inventario físico, una inconsistencia (ej. stock descontado en un nodo pero no en otro) tiene costo operativo real: sobreventas, descuadres contables, pérdida de confianza. Una indisponibilidad temporal y acotada es preferible.
+
+\subsection{Comportamiento según escenario}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{@{}X X l@{}}
+\toprule
+\textbf{Escenario} & \textbf{Comportamiento} & \textbf{Modelo CAP} \\
+\midrule
+3 nodos disponibles & CRUD, ventas y traspasos normales & --- \\
+1 nodo caído, sin operaciones sobre él & Sistema opera; stock del nodo caído muestra ``N/D'' & Lectura disponible parcialmente \\
+Venta en sucursal con nodo caído & Rechazada (HTTP 503), sin cambios en ningún nodo & \textbf{CP}: consistencia $>$ disponibilidad \\
+Traspaso con origen o destino caído & Rollback 2PC completo, ningún nodo modificado & \textbf{CP}: integridad garantizada \\
+Compra simultánea del mismo producto & \code{FOR UPDATE} serializa el acceso; no se duplica el descuento & \textbf{CP}: concurrencia controlada \\
+Nodo simulado OFFLINE & \code{ConexionNodos::get()} lanza excepción antes de conectar & Falla controlada visible \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Comparación con otras estrategias}
+
+\textbf{AP (Disponibilidad + Partición):} Permitiría completar ventas en nodos sanos aunque otros estén caídos, sincronizando después. Descartado porque durante la partición no hay forma de garantizar unicidad del stock (riesgo de sobreventa).
+
+\textbf{CA (Consistencia + Disponibilidad):} Válido en red perfectamente confiable. No aplica a esta arquitectura LAN donde se simulan fallas reales.
+
+\newpage
+% ============================================================
+\section{Manejo de Fallos}
+% ============================================================
+
+\subsection{Detección de Nodo Caído}
+
+\code{ConexionNodos::get(id)} implementa dos niveles de detección:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Falla simulada:} Lee \code{/tmp/libre\_mercado\_nodos.json}; si el nodo está marcado \code{offline}, lanza \code{RuntimeException} inmediatamente (sin intentar conexión TCP).
+    \item \textbf{Falla real:} Si la conexión TCP al contenedor falla dentro de 1 segundo (\code{PDO::ATTR\_TIMEOUT = 1}), lanza \code{PDOException}.
+\end{enumerate}
+
+En ambos casos el código llamador captura \code{Throwable} y devuelve HTTP 503 con mensaje de error claro.
+
+\subsection{Respuesta ante Falla por Tipo de Operación}
+
+\textbf{Venta (\code{sp\_realizar\_compra}):}
+\begin{lstlisting}
+Nodo caido -> ConexionNodos::get() lanza excepcion
+           -> procesar_venta.php captura -> HTTP 503
+           -> El carrito no se vacia; el cliente puede reintentar en otra sucursal
+           -> Stock intacto (no hubo ningun UPDATE)
+\end{lstlisting}
+
+\textbf{Traspaso 2PC:}
+\begin{lstlisting}
+Nodo origen OK, nodo destino CAIDO:
+  Fase 1 -> beginTransaction() en origen OK
+          -> beginTransaction() en destino -> excepcion
+  Fase 2 -> rollBack() en origen (deshace el UPDATE de resta)
+          -> HTTP 503 al cliente
+          -> Ambos nodos quedan en estado anterior
+\end{lstlisting}
+
+\textbf{CRUD de catálogo (\code{MultiNodo}):}
+\begin{lstlisting}
+Cualquier nodo falla durante la replicacion:
+  -> rollBack() en todos los nodos que llegaron a abrir transaccion
+  -> HTTP 503 / mensaje de error
+  -> El catalogo queda sin cambios en todos los nodos
+\end{lstlisting}
+
+\subsection{Simulación de Falla (Requisito 4)}
+
+Desde el panel ``Simular Falla de Nodos'' en el panel de administración:
+
+\begin{enumerate}[nosep]
+    \item El administrador hace clic en \textbf{``Simular Falla''} sobre una sucursal
+    \item Se hace \code{POST /api/nodo\_estado.php} con \code{\{id\_sucursal: X, estado: "offline"\}}
+    \item El servidor escribe \code{\{"1":"online","2":"offline","3":"online"\}} en \code{/tmp/libre\_mercado\_nodos.json}
+    \item A partir de ese momento, toda operación que requiera el nodo 2 recibe error controlado
+\end{enumerate}
+
+\textbf{Recuperación:}
+\begin{enumerate}[nosep]
+    \item Clic en \textbf{``Recuperar Nodo''} $\rightarrow$ estado vuelve a \code{online}
+    \item Clic en \textbf{``Reconstruir Stock (sp)''} $\rightarrow$ llama a \code{sp\_reconstruir\_stock()} para recalcular inventario
+\end{enumerate}
+
+\subsection{Pruebas Obligatorias}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{@{}X X X@{}}
+\toprule
+\textbf{Prueba} & \textbf{Cómo reproducirla} & \textbf{Resultado esperado} \\
+\midrule
+Compra normal & Tienda $\rightarrow$ seleccionar producto $\rightarrow$ comprar & Venta exitosa, stock decrementado \\
+Nodo apagado & Admin $\rightarrow$ ``Simular Falla'' en Suc. Centro $\rightarrow$ intentar comprar ahí & HTTP 503, mensaje claro, stock intacto \\
+Recuperación nodo & Admin $\rightarrow$ ``Recuperar Nodo'' $\rightarrow$ ``Reconstruir Stock'' & Stock recalculado por \code{sp\_reconstruir\_stock} \\
+Compra simultánea & Dos compras al mismo tiempo del mismo producto & \code{FOR UPDATE} serializa; sin duplicar descuento \\
+Pérdida conexión (traspaso) & Simular falla en nodo destino $\rightarrow$ ejecutar traspaso & Rollback 2PC, ningún nodo modificado \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\newpage
+% ============================================================
+\section{Conclusiones}
+% ============================================================
+
+El sistema \textbf{Libre Mercado Distribuido} demuestra que es posible implementar un modelo de comercio electrónico con tolerancia real a fallos de nodos en una red LAN, manteniendo la integridad de los datos en todo momento.
+
+\textbf{Decisiones de diseño validadas:}
+
+\begin{itemize}[nosep]
+    \item \textbf{Modelo CP} es el adecuado para inventario físico: los datos incorrectos tienen mayor costo que la indisponibilidad temporal.
+    \item \textbf{Stored Procedures} centralizan la lógica transaccional en la base de datos, asegurando atomicidad con \code{EXIT HANDLER FOR SQLEXCEPTION} y \code{FOR UPDATE} para concurrencia.
+    \item \textbf{Two-Phase Commit manual} (PHP + PDO) permite operaciones distribuidas entre dos nodos sin depender de un coordinador externo.
+    \item \textbf{Replicación de catálogo} mediante \code{MultiNodo.php} garantiza que productos, clientes y proveedores sean siempre consistentes entre sucursales.
+    \item \textbf{Falla rápida} (\code{ATTR\_TIMEOUT = 1s}, lectura de archivo de estado) evita que una sucursal caída bloquee al resto del sistema indefinidamente.
+\end{itemize}
+
+\textbf{Limitaciones conocidas:}
+
+\begin{itemize}[nosep]
+    \item El coordinador PHP es un punto único de falla: si cae el servidor web, todo el sistema deja de funcionar. En producción se requeriría un balanceador de carga con múltiples instancias PHP.
+    \item La sincronización post-falla es manual (\code{sp\_reconstruir\_stock}). En un sistema AP real se usaría replicación asíncrona automática.
+    \item El 2PC implementado no es tolerante a fallas del propio coordinador durante la fase commit (problema de los generales bizantinos en 2PC).
+\end{itemize}
+
+\end{document}

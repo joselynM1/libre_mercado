@@ -1,189 +1,211 @@
-# Libre Mercado - Sistema Distribuido (3 sucursales / 3 nodos)
+# 🛒 LibreMercado — Sistema Distribuido de Comercio Electrónico
 
-## Arquitectura
+![PHP](https://img.shields.io/badge/PHP-8.2-777BB4?style=for-the-badge&logo=php&logoColor=white)
+![MariaDB](https://img.shields.io/badge/MariaDB-10.4-003545?style=for-the-badge&logo=mariadb&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Architecture](https://img.shields.io/badge/CAP%20Theorem-CP%20Model-orange?style=for-the-badge)
 
-- **3 nodos de base de datos** (MariaDB), uno por sucursal:
-  - `db_suc1` → Sucursal Norte
-  - `db_suc2` → Sucursal Centro
-  - `db_suc3` → Sucursal Sur
-- **1 aplicación PHP** (`app`), que es la ÚNICA página web. Internamente
-  mantiene conexiones PDO independientes a los 3 nodos y consolida la
-  información para mostrarla en una sola pantalla.
+Prototipo de comercio electrónico distribuido desarrollado para la asignatura de **Sistemas Distribuidos**. 
 
-Todos los contenedores están en la misma red Docker (`tienda_net`), lo que
-simula 3 servidores que se ven entre sí en la red.
+El sistema implementa arquitectura **CP** (Consistencia + Tolerancia a Particiones según el Teorema CAP), manejando **CRUD distribuido atómico**, **transacciones ACID locales**, **Two-Phase Commit (2PC)** manual para traspasos de stock entre nodos, y **borrado lógico** para la preservación de la integridad de los datos.
 
-## Cómo levantar el proyecto
+---
 
-Requisitos: Docker y Docker Compose instalados.
+## 👥 Integrantes del Proyecto
 
-```bash
-cd libre_mercado
-docker compose up -d --build
-```
+- **Joselyn Montaño**
+- **Nicolás Malebrán**
 
-La primera vez, MariaDB tardará unos segundos en inicializar cada base
-con los datos del archivo `sql/sucX.sql` correspondiente.
+- **Asignatura**: Sistemas Distribuidos
+- **Profesor**: Juan Torres
 
-Luego abre en el navegador:
+---
+
+## 📐 Arquitectura del Sistema
+
+El sistema opera sobre **4 contenedores Docker** interconectados mediante una red dedicada (`tienda_net`):
 
 ```
-http://localhost:8080
+                        ┌──────────────────────┐
+           Navegador ──▶│   Aplicación PHP     │
+            (AJAX)      │   Apache 8.2 + PDO   │
+                        │   (lm_app)           │
+                        └─────────┬─────┬──────┘
+                          PDO     │     │ PDO         PDO
+                        ┌─────────┘     │      └──────────┐
+                        ▼               ▼                 ▼
+                ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+                │ DB Suc. Norte │ │ DB Suc. Centro│ │ DB Suc. Sur   │
+                │ (lm_db_suc1)  │ │ (lm_db_suc2)  │ │ (lm_db_suc3)  │
+                └───────────────┘ └───────────────┘ └───────────────┘
 ```
 
-## Verificar que los 3 nodos se ven en la red (Paso 0)
+### 📊 Replicación y Distribución de Datos
+
+Cada nodo es una instancia **MariaDB independiente** correspondiente a una sucursal física. Las tablas del sistema se categorizan según su estrategia de persistencia:
+
+| Tipo | Tablas | Comportamiento en la Red |
+|---|---|---|
+| **Catálogo Replicado** | `productos`, `usuarios`, `proveedores`, `sucursales` | Copia idéntica en los 3 nodos. Toda escritura/actualización (`MultiNodo`) se aplica de forma atómica en los 3 nodos simultáneamente. |
+| **Datos Locales** | `stock`, `ventas`, `detalle_ventas`, `compras`, `detalle_compras` | Cada nodo almacena de forma aislada e independiente la información transaccional de su propia sucursal. |
+
+---
+
+## ⚙️ Mecanismos de Consistencia y Transacciones
+
+| Operación | Alcance | Mecanismo Implementado | Comportamiento |
+|---|---|---|---|
+| **Venta** (`procesar_venta.php`) | 1 nodo local | Transacción ACID local (`beginTransaction` / `SELECT...FOR UPDATE` / `commit`) | Garantiza aislamiento y atomaticidad al descontar stock. |
+| **Reabastecimiento / Compra** (`procesar_compra.php`) | 1 nodo local | Transacción ACID local | Registra la orden del proveedor e incrementa el stock en el nodo receptor. |
+| **Traspaso de Stock** (`traspaso_stock.php`) | 2 nodos | **Two-Phase Commit (2PC)** manual | Bloquea y descuenta stock en nodo origen y suma en nodo destino. Rollback coordinado si falla algún nodo. |
+| **CRUD de Catálogo** (`*_crud.php`) | 3 nodos | **Commit Atómico MultiNodo** (`MultiNodo::ejecutar()`) | Operación síncrona en los 3 nodos. Si 1 nodo está caído, se rechaza la transacción (Modelo CP). |
+| **Lectura de Stock** (`stock_consolidado.php`) | 3 nodos | Lectura Best-Effort | Muestra el stock consolidado en vivo. Si un nodo cae, responde con `N/D` sin tumbar el sistema. |
+| **Integridad de Datos** | Global | **Borrado Lógico** (`activo = 0`) | Ninguna baja elimina registros (`DELETE`). Mantiene integridad referencial con el historial de ventas y compras. |
+
+---
+
+## 🧰 Stack Tecnológico
+
+| Capa | Tecnología | Descripción |
+|---|---|---|
+| **Backend** | PHP 8.2 + PDO (`pdo_mysql`) | Lógica de negocio, conexión PDO multinodo y coordinación de transacciones. |
+| **Base de Datos** | MariaDB 10.4 | 3 instancias independientes (`db_suc1`, `db_suc2`, `db_suc3`). |
+| **Servidor Web** | Apache (`php:8.2-apache`) | Servidor web embebido en el contenedor de aplicación. |
+| **Frontend** | HTML5, CSS3, JavaScript Vanilla | Interfaz dinámica con AJAX (`fetch` API), CSS variables y diseño responsivo. |
+| **Orquestación** | Docker & Docker Compose | Redes aisladas y volúmenes persistentes por cada nodo. |
+| **Documentación** | LaTeX / PDF / Markdown | Informes técnicos de arquitectura CAP y especificación del sistema. |
+
+---
+
+## 🚀 Instalación y Ejecución
+
+### Requisitos Previos
+- [Docker Desktop](https://www.docker.com/) o Docker Engine con Docker Compose instalado.
+
+### Pasos para levantar el proyecto
+
+1. **Clonar el repositorio**:
+   ```bash
+   git clone <URL_DEL_REPOSITORIO>
+   cd libre_mercado2/libre_mercado
+   ```
+
+2. **Desplegar los contenedores**:
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. **Acceder a la aplicación**:
+   - 🛍️ **Tienda principal**: [http://localhost:8080](http://localhost:8080)
+   - 🛠️ **Panel de Administración**: [http://localhost:8080/admin.php](http://localhost:8080/admin.php)
+
+---
+
+## 🔍 Verificación y Diagnóstico de Red
+
+Para verificar la conectividad inter-nodo y las conexiones PDO desde el contenedor de aplicación:
 
 ```bash
 docker exec -it lm_app bash
-ping db_suc1
-ping db_suc2
-ping db_suc3
-php -r "new PDO('mysql:host=db_suc2;dbname=libre_mercado_suc2','app','app123'); echo 'OK suc2';"
+
+# Verificar conectividad de red entre contenedores
+ping db_suc1 && ping db_suc2 && ping db_suc3
+
+# Probar conexión PDO directa a un nodo secundario
+php -r "new PDO('mysql:host=db_suc2;dbname=libre_mercado_suc2','app','app123'); echo 'Conexión OK';"
 ```
 
-## Interfaz (estilo LibreMercado)
+---
 
-La página ahora tiene el estilo de marca "LibreMercado": header con estado
-de los 3 nodos (punto verde = conectado, rojo = caído), banner principal,
-buscador + filtros por categoría, y catálogo en cards. Cada card muestra
-el stock de las **3 sucursales en paralelo** (chip verde = stock normal,
-naranja = stock bajo ≤5, gris "N/D" = nodo caído).
+## 🛍️ Vistas y Funcionalidades del Sistema
 
-El botón "Agregar al Carrito" permite elegir desde qué sucursal se
-descuenta el stock. El carrito es lateral; "Confirmar Compra" envía una
-venta por cada item a `api/procesar_venta.php` (transacción ACID en el
-nodo correspondiente). Para esta demo, las ventas del carrito quedan
-asociadas al cliente con `id_usuario = 1` (Juan Pérez); puedes cambiarlo
-en `app/src/assets/app.js` (constante `ID_CLIENTE_DEMO`) o agregar un
-selector de usuario más adelante.
+### 1. Tienda de Clientes (`index.php`)
+- **Monitoreo en tiempo real**: Indicador en el header con estado de conexión de los 3 nodos (Verde = Operativo, Rojo = Caído), actualizado automáticamente cada 5 segundos.
+- **Catálogo Consolidado**: Buscador por texto, filtro por categorías y chips de stock por sucursal (*Verde = Normal*, *Naranja = Bajo ≤5*, *Gris = N/D nodo caído*).
+- **Carrito Multisucursal**: Permite seleccionar la sucursal de origen por cada ítem antes de procesar el pago.
+- **Pasarela de Pago (Checkout)**: Genera transacciones ACID en los nodos correspondientes.
 
-## Panel de Administración (CRUD)
+### 2. Panel de Administración (`admin.php`)
+- **Gestión de Productos**: CRUD de catálogo replicado con borrado/reactivación lógica y asignación de stock inicial por sucursal.
+- **Gestión de Clientes / Usuarios**: Administra usuarios y roles (Cliente, Operador, Administrador) sincronizados en los 3 nodos.
+- **Gestión de Proveedores**: CRUD distribuido de proveedores.
+- **Reabastecimiento (Compras)**: Registra compras a proveedores incrementando stock en el nodo local de la sucursal receptora.
+- **Traspaso de Stock**: Transferencia coordinada de productos entre sucursales ejecutada mediante Two-Phase Commit (2PC).
 
-Desde la tienda, el botón "Administración" del header lleva a `admin.php`,
-con tres pestañas: **Productos**, **Clientes/Usuarios** y **Proveedores**.
+---
 
-Estas tres entidades son **catálogos replicados** en los 3 nodos. Cada
-operación (crear, editar, dar de baja/reactivar) se ejecuta mediante
-`MultiNodo::ejecutar()`, que abre transacción en los 3 nodos y solo
-confirma si los 3 responden correctamente:
+## 🔌 Simulación de Partición de Red (Demostración CAP)
 
-- Si algún nodo no está disponible, la operación se **rechaza por
-  completo**, sin aplicar cambios parciales (modelo CP).
-- Los IDs (`id_producto`, `id_usuario`, `id_proveedor`) se generan de
-  forma centralizada (`MultiNodo::siguienteId()`) para que el mismo
-  registro tenga el mismo ID en los 3 nodos.
+Para evaluar la resiliencia y el cumplimiento del modelo **CP**:
 
-**Borrado lógico**: ningún "Dar de baja" hace `DELETE`. Solo cambia el
-campo `activo` a 0 en los 3 nodos. Los productos inactivos dejan de
-aparecer en la tienda (ya filtrados en `stock_consolidado.php`), pero
-sus ventas históricas y referencias (`detalle_ventas`, `stock`) quedan
-intactas. "Reactivar" vuelve a poner `activo = 1`.
+1. **Detener una base de datos (Simular caída de Sucursal Centro)**:
+   ```bash
+   docker stop lm_db_suc2
+   ```
 
-### ⚠️ Migración si ya tenías los contenedores corriendo
+2. **Comportamiento esperado**:
+   - **Lectura**: El stock de Sucursal Centro cambiará a `N/D` en la tienda, pero las Sucursales Norte y Sur continuarán operando con normalidad.
+   - **Escritura**: Cualquier intento de crear/modificar productos, usuarios o realizar un traspaso que involucre a Sucursal Centro será **rechazado por completo** para evitar inconsistencias distribuidas.
 
-La tabla `proveedores` ahora incluye una columna `activo` que no existía
-en el esquema anterior. Los scripts de `sql/*.sql` solo se ejecutan en
-contenedores **nuevos** (volumen vacío). Tienes dos opciones:
+3. **Reactivar la sucursal**:
+   ```bash
+   docker start lm_db_suc2
+   ```
 
-**Opción A — Recrear todo desde cero (pierdes los datos de prueba):**
+---
+
+## ⚠️ Migración de Esquema de Base de Datos
+
+Si ya tienes volúmenes anteriores creados en Docker y necesitas aplicar la columna `activo` en la tabla `proveedores`:
+
+**Opción A — Reiniciar entorno desde cero**:
 ```bash
 docker compose down -v
 docker compose up -d --build
 ```
 
-**Opción B — Migrar sin perder datos**, ejecutando el script en cada nodo:
+**Opción B — Ejecutar migración manual en caliente**:
 ```bash
 docker exec -i lm_db_suc1 mysql -uapp -papp123 libre_mercado_suc1 < sql/migracion_activo_proveedores.sql
 docker exec -i lm_db_suc2 mysql -uapp -papp123 libre_mercado_suc2 < sql/migracion_activo_proveedores.sql
 docker exec -i lm_db_suc3 mysql -uapp -papp123 libre_mercado_suc3 < sql/migracion_activo_proveedores.sql
 ```
 
-Luego de cualquiera de las dos opciones, reconstruye la app:
-```bash
-docker compose up -d --build app
-```
+---
 
-## Reabastecimiento (Compras a proveedores)
-
-Pestaña "Reabastecimiento" del panel de administración. A diferencia del
-CRUD de catálogo (que escribe en los 3 nodos), una compra es una
-**transacción ACID local** al nodo de la sucursal que recibe la
-mercadería — igual que una venta, pero en sentido inverso:
-
-1. Seleccionas la sucursal que recibe, el proveedor, y armas una orden
-   (producto + cantidad + precio de compra, puedes agregar varios items).
-2. Al "Registrar Compra", `api/procesar_compra.php` abre una transacción
-   en el nodo de esa sucursal: inserta `compras` y `detalle_compras`, y
-   **aumenta** el `stock` de cada producto. Si algo falla a mitad de
-   camino, hace rollback completo (no queda stock sumado sin su compra
-   registrada, ni una compra sin detalle).
-3. Debajo se muestra el historial de compras de esa sucursal
-   (`api/compras_listar.php`).
-
-> Como la base de datos no trae proveedores de ejemplo, antes de probar
-> esto crea al menos un proveedor en la pestaña "Proveedores".
-
-## Funcionalidades de la página
-
-1. **Stock consolidado**: tabla con cada producto y su stock en las 3
-   sucursales, leído en vivo desde los 3 nodos vía AJAX
-   (`api/stock_consolidado.php`). Si un nodo está caído, esa columna
-   muestra "N/D" y el resto de la página sigue funcionando (lectura
-   parcial).
-
-2. **Registrar venta** (`api/procesar_venta.php`): transacción ACID
-   local al nodo de la sucursal vendedora. Si el stock es insuficiente,
-   hace `rollBack()` y no se registra nada.
-
-3. **Traspaso de stock entre sucursales** (`api/traspaso_stock.php`):
-   implementa **Two-Phase Commit manual** entre dos nodos distintos.
-   Si cualquiera de los dos nodos no responde o no tiene stock
-   suficiente, se hace rollback en AMBOS y la operación se cancela
-   completa. Esto demuestra la elección **CP** (Consistencia +
-   Tolerancia a Particiones) del Teorema CAP.
-
-## Simular una partición de red (para el informe CAP)
-
-Para demostrar qué pasa cuando un nodo no está disponible:
-
-```bash
-docker stop lm_db_suc2
-```
-
-- Refresca la página: la columna "Sucursal Centro" mostrará "N/D" en
-  vez de romper la página (disponibilidad parcial de lectura).
-- Intenta una venta en Sucursal Centro o un traspaso que involucre ese
-  nodo: el sistema debe rechazar la operación con un mensaje claro,
-  sin dejar el stock inconsistente (consistencia priorizada).
-
-Para reactivar el nodo:
-
-```bash
-docker start lm_db_suc2
-```
-
-## Estructura de carpetas
+## 📁 Estructura del Proyecto
 
 ```
 libre_mercado/
-├── docker-compose.yml
+├── docker-compose.yml                  # Configuración de contenedores (lm_app, lm_db_suc1, lm_db_suc2, lm_db_suc3)
 ├── sql/
-│   ├── suc1.sql
-│   ├── suc2.sql
-│   └── suc3.sql
+│   ├── suc1.sql                        # Esquema + datos iniciales Sucursal Norte
+│   ├── suc2.sql                        # Esquema + datos iniciales Sucursal Centro
+│   ├── suc3.sql                        # Esquema + datos iniciales Sucursal Sur
+│   └── migracion_activo_proveedores.sql# Script de actualización de esquema
+├── docs/
+│   ├── arquitectura_cap.md             # Documentación teórica Teorema CAP
+│   ├── arquitectura_cap.pdf            # PDF renderizado del informe de arquitectura
+│   └── informe_proyecto.pdf            # Informe completo del proyecto
 └── app/
-    ├── Dockerfile
+    ├── Dockerfile                      # Imagen PHP 8.2 Apache + pdo_mysql
     └── src/
-        ├── index.php
-        ├── ConexionNodos.php
-        ├── api/
-        │   ├── stock_consolidado.php
-        │   ├── procesar_venta.php
-        │   ├── traspaso_stock.php
-        │   └── clientes.php
-        └── assets/
-            ├── app.js
-            └── style.css
+        ├── index.php                   # Vista principal de la tienda
+        ├── admin.php                   # Panel de administración distribuido
+        ├── ConexionNodos.php           # Gestor de conexiones PDO a los 3 nodos DB
+        ├── MultiNodo.php               # Coordinador de transacciones síncronas en 3 nodos
+        ├── assets/
+        │   ├── app.js                  # Lógica del cliente, carrito y AJAX
+        │   ├── admin.js                # Lógica del panel de administración
+        │   └── style.css               # Estilos globales y componentes UI
+        └── api/
+            ├── stock_consolidado.php   # Endpoint de consulta de stock en vivo
+            ├── procesar_venta.php      # Endpoint de transacciones de venta (ACID local)
+            ├── procesar_compra.php     # Endpoint de reabastecimiento (ACID local)
+            ├── traspaso_stock.php      # Endpoint de transferencia de stock (2PC)
+            ├── compras_listar.php      # Endpoint de consulta de historial de compras
+            ├── productos_crud.php      # API CRUD distribuido de productos
+            ├── clientes_crud.php       # API CRUD distribuido de usuarios/clientes
+            ├── proveedores_crud.php    # API CRUD distribuido de proveedores
+            └── clientes.php            # Endpoint secundario de consulta de clientes
 ```
-
-
